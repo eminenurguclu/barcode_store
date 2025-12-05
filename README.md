@@ -1,4 +1,4 @@
-# BIM 493 - Assignment 4 (Barcode Store)
+# BIM 493 - Assignment 4 (Barcode Store Manager)
 
 This Flutter application serves as a store inventory management system using a local SQLite database, developed for the Mobile Programming I course.
 
@@ -39,3 +39,9 @@ A single table, `ProductTable`, is used:
     ```bash
     flutter run
     ```
+
+## Group Members
+
+* Bahar Demirkan
+* Emine Nur Güçlü
+* Emirhan Temiz
