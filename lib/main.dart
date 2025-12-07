@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart';
 import 'product_model.dart';
-import 'database_helper.dart';
 
-void main() {
+import 'package:provider/provider.dart';
+import 'product_provider.dart';
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MyApp());
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => ProductProvider()..loadAllProducts(),
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -15,8 +22,16 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Store Manager',
+      themeMode: ThemeMode.system, 
       theme: ThemeData(
         primarySwatch: Colors.blue,
+        brightness: Brightness.light,
+        inputDecorationTheme: const InputDecorationTheme(
+          border: OutlineInputBorder(),
+          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        ),
+      ),
+      darkTheme: ThemeData.dark().copyWith(
         inputDecorationTheme: const InputDecorationTheme(
           border: OutlineInputBorder(),
           contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -36,39 +51,30 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   final TextEditingController _searchController = TextEditingController();
-  List<Product> _products = [];
-  bool _isLoading = true;
 
-  @override
-  void initState() {
-    super.initState();
-    _refreshProductList();
+  void _calculatePrice(
+      TextEditingController unitPriceCtrl,
+      TextEditingController taxCtrl,
+      TextEditingController totalCtrl,
+      ) {
+    double unit = double.tryParse(unitPriceCtrl.text) ?? 0.0;
+    int tax = int.tryParse(taxCtrl.text) ?? 0;
+    double total = unit + (unit * (tax / 100));
+    totalCtrl.text = total.toStringAsFixed(2);
   }
 
-  Future<void> _refreshProductList() async {
-    setState(() => _isLoading = true);
-    final data = await DatabaseHelper.instance.getAllProducts();
-    setState(() {
-      _products = data;
-      _isLoading = false;
-    });
-  }
-
-  void _handleSearch() async {
+  Future<void> _handleSearch() async {
+    final provider = context.read<ProductProvider>();
     String barcode = _searchController.text.trim();
+
     if (barcode.isEmpty) {
-      _refreshProductList();
+      await provider.loadAllProducts();
       return;
     }
 
-    Product? product = await DatabaseHelper.instance.getProductByBarcode(barcode);
+    await provider.searchByBarcode(barcode);
 
-    if (product != null) {
-      setState(() {
-        _products = [product];
-      });
-    } else {
-      if (!mounted) return;
+    if (provider.products.isEmpty && mounted) {
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
@@ -92,32 +98,29 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  void _calculatePrice(
-      TextEditingController unitPriceCtrl,
-      TextEditingController taxCtrl,
-      TextEditingController totalCtrl,
-      ) {
-    double unit = double.tryParse(unitPriceCtrl.text) ?? 0.0;
-    int tax = int.tryParse(taxCtrl.text) ?? 0;
-    double total = unit + (unit * (tax / 100));
-    totalCtrl.text = total.toStringAsFixed(2);
-  }
+  void _showProductForm(BuildContext context,
+      {Product? product, String? initialBarcode}) {
+    final provider = context.read<ProductProvider>();
 
-  void _showProductForm(BuildContext context, {Product? product, String? initialBarcode}) {
     final formKey = GlobalKey<FormState>();
-    final barcodeCtrl = TextEditingController(text: product?.barcodeNo ?? initialBarcode ?? '');
+    final barcodeCtrl =
+    TextEditingController(text: product?.barcodeNo ?? initialBarcode ?? '');
     final nameCtrl = TextEditingController(text: product?.productName ?? '');
     final categoryCtrl = TextEditingController(text: product?.category ?? '');
-    final unitPriceCtrl = TextEditingController(text: product?.unitPrice.toString() ?? '');
-    final taxCtrl = TextEditingController(text: product?.taxRate.toString() ?? '');
-    final priceCtrl = TextEditingController(text: product?.price.toString() ?? '');
-    final stockCtrl = TextEditingController(text: product?.stockInfo?.toString() ?? '');
+    final unitPriceCtrl =
+    TextEditingController(text: product?.unitPrice.toString() ?? '');
+    final taxCtrl =
+    TextEditingController(text: product?.taxRate.toString() ?? '');
+    final priceCtrl =
+    TextEditingController(text: product?.price.toString() ?? '');
+    final stockCtrl =
+    TextEditingController(text: product?.stockInfo?.toString() ?? '');
 
     bool isEdit = product != null;
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: Text(isEdit ? 'Edit Product' : 'Add Product'),
         content: SingleChildScrollView(
           child: Form(
@@ -156,15 +159,19 @@ class _MainScreenState extends State<MainScreen> {
                           labelText: 'Unit Price',
                           errorMaxLines: 1,
                         ),
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
                         validator: (value) {
-                          if (value == null || value.isEmpty) return 'Required';
+                          if (value == null || value.isEmpty) {
+                            return 'Required';
+                          }
                           final number = double.tryParse(value);
                           if (number == null) return 'Invalid';
                           if (number < 0) return 'Min 0';
                           return null;
                         },
-                        onChanged: (_) => _calculatePrice(unitPriceCtrl, taxCtrl, priceCtrl),
+                        onChanged: (_) =>
+                            _calculatePrice(unitPriceCtrl, taxCtrl, priceCtrl),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -177,13 +184,16 @@ class _MainScreenState extends State<MainScreen> {
                         ),
                         keyboardType: TextInputType.number,
                         validator: (value) {
-                          if (value == null || value.isEmpty) return 'Required';
+                          if (value == null || value.isEmpty) {
+                            return 'Required';
+                          }
                           final number = int.tryParse(value);
                           if (number == null) return 'Invalid';
                           if (number < 0) return 'Min 0';
                           return null;
                         },
-                        onChanged: (_) => _calculatePrice(unitPriceCtrl, taxCtrl, priceCtrl),
+                        onChanged: (_) =>
+                            _calculatePrice(unitPriceCtrl, taxCtrl, priceCtrl),
                       ),
                     ),
                   ],
@@ -192,13 +202,15 @@ class _MainScreenState extends State<MainScreen> {
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: priceCtrl,
-                  decoration: const InputDecoration(labelText: 'Total Price (Auto)'),
+                  decoration:
+                  const InputDecoration(labelText: 'Total Price (Auto)'),
                   readOnly: true,
                 ),
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: stockCtrl,
-                  decoration: const InputDecoration(labelText: 'Stock Info (Optional)'),
+                  decoration: const InputDecoration(
+                      labelText: 'Stock Info (Optional)'),
                   keyboardType: TextInputType.number,
                   validator: (value) {
                     if (value == null || value.isEmpty) return null;
@@ -214,7 +226,7 @@ class _MainScreenState extends State<MainScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
@@ -227,25 +239,41 @@ class _MainScreenState extends State<MainScreen> {
                   unitPrice: double.parse(unitPriceCtrl.text),
                   taxRate: int.parse(taxCtrl.text),
                   price: double.parse(priceCtrl.text),
-                  stockInfo: stockCtrl.text.isEmpty ? null : int.parse(stockCtrl.text),
+                  stockInfo: stockCtrl.text.isEmpty
+                      ? null
+                      : int.parse(stockCtrl.text),
                 );
 
                 if (isEdit) {
-                  await DatabaseHelper.instance.updateProduct(newProduct);
-                } else {
-                  var existing = await DatabaseHelper.instance.getProductByBarcode(newProduct.barcodeNo);
-                  if (existing != null) {
+                  await provider.updateProduct(newProduct);
+                  if (mounted) {
+                    Navigator.pop(dialogContext);
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Barcode already exists!')),
+                      const SnackBar(
+                        content: Text('Product updated successfully.'),
+                      ),
                     );
+                  }
+                } else {
+                  final ok = await provider.addProduct(newProduct);
+                  if (!ok) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(dialogContext).showSnackBar(
+                        const SnackBar(
+                          content: Text('Barcode already exists!'),
+                        ),
+                      );
+                    }
                     return;
                   }
-                  await DatabaseHelper.instance.insertProduct(newProduct);
-                }
-
-                if (context.mounted) {
-                  Navigator.pop(context);
-                  _refreshProductList();
+                  if (mounted) {
+                    Navigator.pop(dialogContext);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Product added successfully.'),
+                      ),
+                    );
+                  }
                 }
               }
             },
@@ -257,32 +285,143 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   void _confirmDelete(String barcode) {
+    final provider = context.read<ProductProvider>();
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Confirm Delete'),
         content: const Text('Are you sure you want to delete this product?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             onPressed: () async {
-              await DatabaseHelper.instance.deleteProduct(barcode);
-              if (context.mounted) {
-                Navigator.pop(context);
-                _refreshProductList();
+              await provider.deleteProduct(barcode);
+              if (mounted) {
+                Navigator.pop(dialogContext);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Product deleted successfully.'),
+                  ),
+                );
               }
             },
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Colors.red),
+            ),
           ),
         ],
       ),
     );
   }
 
+  Widget _buildStockBadge(int? stock) {
+    if (stock == null) {
+      return const Text("Stock: N/A");
+    }
+
+    Color bg;
+    String text;
+
+    if (stock == 0) {
+      bg = Colors.red.shade100;
+      text = "Out of stock";
+    } else if (stock < 5) {
+      bg = Colors.orange.shade100;
+      text = "Low: $stock";
+    } else {
+      bg = Colors.green.shade100;
+      text = "Stock: $stock";
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(fontSize: 12),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.inventory_2_outlined,
+            size: 64, color: Colors.grey.shade400),
+        const SizedBox(height: 12),
+        const Text(
+          "No products yet",
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          "Tap + button to add your first product.",
+          style: TextStyle(color: Colors.grey.shade600),
+        ),
+      ],
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(() {
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<ProductProvider>();
+    final products = provider.products;
+    final isLoading = provider.isLoading;
+
+    const categories = ['All', 'Electronics', 'Food', 'Clothes', 'Other'];
+
     return Scaffold(
-      appBar: AppBar(title: const Text("Product Store")),
+      appBar: AppBar(
+        title: const Text("Product Store"),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              provider.sortBy(value);
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'name_asc',
+                child: Text('Name A–Z'),
+              ),
+              PopupMenuItem(
+                value: 'name_desc',
+                child: Text('Name Z–A'),
+              ),
+              PopupMenuItem(
+                value: 'price_asc',
+                child: Text('Price Low–High'),
+              ),
+              PopupMenuItem(
+                value: 'price_desc',
+                child: Text('Price High–Low'),
+              ),
+            ],
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -292,67 +431,162 @@ class _MainScreenState extends State<MainScreen> {
                 Expanded(
                   child: TextField(
                     controller: _searchController,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: "Enter Barcode",
-                      prefixIcon: Icon(Icons.qr_code),
+                      prefixIcon: const Icon(Icons.qr_code),
+                      suffixIcon: _searchController.text.isNotEmpty
+                          ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () async {
+                          _searchController.clear();
+                          await provider.clearSearch();
+                        },
+                      )
+                          : null,
                     ),
+                    onSubmitted: (_) => _handleSearch(),
                   ),
                 ),
                 const SizedBox(width: 10),
-                ElevatedButton.icon(
+                ElevatedButton(
                   onPressed: _handleSearch,
-                  icon: const Icon(Icons.search),
-                  label: const Text("Search"),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.search, size: 18),
+                      SizedBox(width: 4),
+                      Text("Search"),
+                    ],
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 20),
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _products.isEmpty
-                  ? const Center(child: Text("No products found."))
-                  : ListView.builder(
-                itemCount: _products.length,
+
+            const SizedBox(height: 12),
+
+            SizedBox(
+              height: 40,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: categories.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
                 itemBuilder: (context, index) {
-                  final p = _products[index];
-                  return Card(
-                    elevation: 3,
-                    margin: const EdgeInsets.symmetric(vertical: 8),
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: Colors.blue.shade100,
-                        child: Text(
-                          p.productName.isNotEmpty ? p.productName.substring(0, 1).toUpperCase() : '?',
-                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
-                        ),
-                      ),
-                      title: Text(p.productName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const SizedBox(height: 4),
-                          Text("Category: ${p.category}"),
-                          Text("Price: \$${p.price.toStringAsFixed(2)} (Tax: ${p.taxRate}%)"),
-                          Text("Stock: ${p.stockInfo ?? 'N/A'}"),
-                        ],
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.edit, color: Colors.blue),
-                            onPressed: () => _showProductForm(context, product: p),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () => _confirmDelete(p.barcodeNo),
-                          ),
-                        ],
-                      ),
-                    ),
+                  final c = categories[index];
+                  final isSelected = provider.selectedCategory == c;
+                  return ChoiceChip(
+                    label: Text(c),
+                    selected: isSelected,
+                    onSelected: (_) => provider.setCategory(c),
                   );
                 },
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            Expanded(
+              child: isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : RefreshIndicator(
+                onRefresh: provider.loadAllProducts,
+                child: products.isEmpty
+                    ? ListView(
+                  physics:
+                  const AlwaysScrollableScrollPhysics(),
+                  children: [
+                    const SizedBox(height: 120),
+                    Center(child: _buildEmptyState(context)),
+                  ],
+                )
+                    : ListView.builder(
+                  physics:
+                  const AlwaysScrollableScrollPhysics(),
+                  itemCount: products.length,
+                  itemBuilder: (context, index) {
+                    final p = products[index];
+
+                    final isSearchedItem =
+                        provider.lastSearchedBarcode != null &&
+                            p.barcodeNo ==
+                                provider.lastSearchedBarcode;
+
+                    return Card(
+                      elevation: 3,
+                      color: isSearchedItem
+                          ? Colors.blue.shade50
+                          : null,
+                      margin: const EdgeInsets.symmetric(
+                          vertical: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: ListTile(
+                        contentPadding:
+                        const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8),
+                        leading: CircleAvatar(
+                          backgroundColor:
+                          Colors.blue.shade100,
+                          child: Text(
+                            p.productName.isNotEmpty
+                                ? p.productName
+                                .substring(0, 1)
+                                .toUpperCase()
+                                : '?',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue,
+                            ),
+                          ),
+                        ),
+                        title: Text(
+                          p.productName,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 4),
+                            Text("Barcode: ${p.barcodeNo}"),
+                            Text("Category: ${p.category}"),
+                            Text(
+                              "Price: \$${p.price.toStringAsFixed(2)} "
+                                  "(Tax: ${p.taxRate}%)",
+                            ),
+                            const SizedBox(height: 4),
+                            _buildStockBadge(p.stockInfo),
+                          ],
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(
+                                Icons.edit,
+                                color: Colors.blue,
+                              ),
+                              onPressed: () =>
+                                  _showProductForm(context,
+                                      product: p),
+                            ),
+                            IconButton(
+                              icon: const Icon(
+                                Icons.delete,
+                                color: Colors.red,
+                              ),
+                              onPressed: () =>
+                                  _confirmDelete(p.barcodeNo),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ),
             ),
           ],
